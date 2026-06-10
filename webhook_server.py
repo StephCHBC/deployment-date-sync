@@ -181,3 +181,22 @@ def webhook():
     except Exception as e:
         print(f"Error processing webhook: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+        
+
+@app.route("/manual-sync", methods=["POST"])
+def manual_sync():
+    try:
+        result = sync_inventory_dates()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "healthy"}), 200
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
