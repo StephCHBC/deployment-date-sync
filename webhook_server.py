@@ -44,7 +44,10 @@ def get_deployment_date() -> Optional[datetime]:
     query = """
     query ($itemId: [ID!]) {
         items(ids: $itemId) {
+            id
+            name
             column_values(ids: ["timerange_mm45hv8d"]) {
+                id
                 value
             }
         }
@@ -52,15 +55,26 @@ def get_deployment_date() -> Optional[datetime]:
     """
     variables = {"itemId": [DEPLOYMENT_ITEM_ID]}
     data = execute_query(query, variables)
-    if not data["items"]:
+    
+    if not data.get("items") or len(data["items"]) == 0:
         return None
-    timeline_value = data["items"][0]["column_values"][0]["value"]
+    
+    item = data["items"][0]
+    
+    if not item.get("column_values") or len(item["column_values"]) == 0:
+        return None
+    
+    timeline_value = item["column_values"][0]["value"]
+    
     if not timeline_value or timeline_value == "null":
         return None
+    
     timeline_data = json.loads(timeline_value)
     deployment_date_str = timeline_data.get("to")
+    
     if not deployment_date_str:
         return None
+    
     return datetime.strptime(deployment_date_str, "%Y-%m-%d")
 
 
@@ -92,20 +106,82 @@ def get_inventory_items() -> List[Dict]:
                 inventory_items.append(item)
     return inventory_items
 
+
+def calculate_offset_date(deployment_date: datetime, item_name: str) -> Optional[datetime]:
+    for key, offset_days in DATE_OFFSETS.items():
+        if key.lower() in item_name.lower():
+            return deployment_date + timedelta(days=offset_days)
+    return None
+
+
+def update_item_timeline(item_id: str, new_date: datetime) -> bool:
+    date_str = new_date.strftime("%Y-%m-%d")
+    timeline_value = json.dumps({"from": date_str, "to": date_str})
+    query = """
+    mutation ($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) {
+        change_column_value(
+            board_id: $boardId,
+            item_id: $itemId,
+            column_id: $columnId,
+            value: $value
+        ) { id }
+    }
+    """
+    variables = {
+        "boardId": BOARD_ID,
+        "itemId": item_id,
+        "columnId": TIMELINE_COLUMN_ID,
+        "value": timeline_value
+    }
+    try:
+        execute_query(query, variables)
+        print(f"Updated item {item_id} to {date_str}")
+        return True
+    except Exception as e:
+        print(f"Error updating item {item_id}: {e}")
+        return False
+
+
+def sync_inventory_dates():
+    deployment_date = get_deployment_date()
+    if not deployment_date:
+        return {"status": "skipped", "reason": "No deployment date set"}
+    
+    print(f"Deployment date: {deployment_date.strftime('%Y-%m-%d')}")
+    
+    inventory_items = get_inventory_items()
+    if not inventory_items:
+        return {"status": "skipped", "reason": "No inventory items found"}
+    
+    print(f"Found {len(inventory_items)} inventory items")
+    
+    updated_count = 0
+    for item in inventory_items:
+        item_id = item["id"]
+        item_name = item["name"]
+        offset_date = calculate_offset_date(deployment_date, item_name)
+        if offset_date:
+            if update_item_timeline(item_id, offset_date):
+                updated_count += 1
+    
+    return {
+        "status": "success",
+        "deployment_date": deployment_date.strftime("%Y-%m-%d"),
+        "updated_count": updated_count
+    }
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         payload = request.json
         
-        # Handle Monday.com challenge verification
         if payload.get("challenge"):
             return jsonify({"challenge": payload["challenge"]}), 200
         
-        # Verify this is a column change event
         if payload.get("event", {}).get("type") != "update_column_value":
             return jsonify({"status": "ignored"}), 200
         
-        # Check if it's the deployment item and timeline column
         item_id = str(payload.get("event", {}).get("pulseId", ""))
         column_id = payload.get("event", {}).get("columnId", "")
         
@@ -115,7 +191,6 @@ def webhook():
         if column_id != TIMELINE_COLUMN_ID:
             return jsonify({"status": "ignored"}), 200
         
-        # Trigger the sync
         print(f"Deployment date changed - triggering sync...")
         result = sync_inventory_dates()
         
@@ -123,8 +198,10 @@ def webhook():
         
     except Exception as e:
         print(f"Error processing webhook: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
-        
+
 
 @app.route("/manual-sync", methods=["POST"])
 def manual_sync():
