@@ -92,63 +92,6 @@ def get_inventory_items() -> List[Dict]:
                 inventory_items.append(item)
     return inventory_items
 
-
-def calculate_offset_date(deployment_date: datetime, item_name: str) -> Optional[datetime]:
-    for key, offset_days in DATE_OFFSETS.items():
-        if key.lower() in item_name.lower():
-            return deployment_date + timedelta(days=offset_days)
-    return None
-
-
-def update_item_timeline(item_id: str, new_date: datetime) -> bool:
-    date_str = new_date.strftime("%Y-%m-%d")
-    timeline_value = json.dumps({"from": date_str, "to": date_str})
-    query = """
-    mutation ($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) {
-        change_column_value(
-            board_id: $boardId,
-            item_id: $itemId,
-            column_id: $columnId,
-            value: $value
-        ) { id }
-    }
-    """
-    variables = {
-        "boardId": BOARD_ID,
-        "itemId": item_id,
-        "columnId": TIMELINE_COLUMN_ID,
-        "value": timeline_value
-    }
-    try:
-        execute_query(query, variables)
-        return True
-    except Exception as e:
-        print(f"Error updating item {item_id}: {e}")
-        return False
-
-
-def sync_inventory_dates():
-    deployment_date = get_deployment_date()
-    if not deployment_date:
-        return {"status": "skipped", "reason": "No deployment date set"}
-    inventory_items = get_inventory_items()
-    if not inventory_items:
-        return {"status": "skipped", "reason": "No inventory items found"}
-    updated_count = 0
-    for item in inventory_items:
-        item_id = item["id"]
-        item_name = item["name"]
-        offset_date = calculate_offset_date(deployment_date, item_name)
-        if offset_date:
-            if update_item_timeline(item_id, offset_date):
-                updated_count += 1
-    return {
-        "status": "success",
-        "deployment_date": deployment_date.strftime("%Y-%m-%d"),
-        "updated_count": updated_count
-    }
-
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
