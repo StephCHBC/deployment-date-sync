@@ -153,36 +153,31 @@ def sync_inventory_dates():
 def webhook():
     try:
         payload = request.json
+        
+        # Handle Monday.com challenge verification
+        if payload.get("challenge"):
+            return jsonify({"challenge": payload["challenge"]}), 200
+        
+        # Verify this is a column change event
         if payload.get("event", {}).get("type") != "update_column_value":
             return jsonify({"status": "ignored"}), 200
+        
+        # Check if it's the deployment item and timeline column
         item_id = str(payload.get("event", {}).get("pulseId", ""))
         column_id = payload.get("event", {}).get("columnId", "")
+        
         if item_id != DEPLOYMENT_ITEM_ID:
             return jsonify({"status": "ignored"}), 200
+        
         if column_id != TIMELINE_COLUMN_ID:
             return jsonify({"status": "ignored"}), 200
+        
+        # Trigger the sync
         print(f"Deployment date changed - triggering sync...")
         result = sync_inventory_dates()
+        
         return jsonify(result), 200
+        
     except Exception as e:
         print(f"Error processing webhook: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/manual-sync", methods=["POST"])
-def manual_sync():
-    try:
-        result = sync_inventory_dates()
-        return jsonify(result), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "healthy"}), 200
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
