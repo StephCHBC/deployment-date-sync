@@ -99,13 +99,16 @@ def get_inventory_items() -> List[Dict]:
     all_items = data["boards"][0]["items_page"]["items"]
     inventory_items = []
     for item in all_items:
+        # Safety check: make sure column_values exists and has data
+        if not item.get("column_values") or len(item["column_values"]) == 0:
+            continue
+        
         phase_value = item["column_values"][0]["value"]
         if phase_value and phase_value != "null":
             phase_data = json.loads(phase_value)
             if phase_data.get("index") == INVENTORY_PHASE_INDEX:
                 inventory_items.append(item)
     return inventory_items
-
 
 def calculate_offset_date(deployment_date: datetime, item_name: str) -> Optional[datetime]:
     for key, offset_days in DATE_OFFSETS.items():
